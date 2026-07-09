@@ -1,0 +1,98 @@
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+
+name: Update Pipeline
+
+#==================================================================================================
+# Trigger Conditions
+#==================================================================================================
+
+on:
+  # Nightly check for newer pinned inputs (08:00 UTC == 00:00 PST), matching the
+  # llvm fork's nanvix-update schedule.
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+# Serialize update runs so concurrent bumps do not race on the PR branch.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+#==================================================================================================
+# Environment Variables
+#==================================================================================================
+
+env:
+  # GitHub usernames (comma-separated) assigned to the bump PR. The PR is
+  # authored by the DISPATCH_TOKEN owner, and GitHub forbids requesting a review
+  # from a PR's own author ("Review cannot be requested from pull request
+  # author"), so the maintainer is assigned rather than requested as a reviewer.
+  PR_ASSIGNEES: ppenna
+
+#==================================================================================================
+# Jobs
+#==================================================================================================
+
+jobs:
+  update:
+    name: Bump pinned toolchain inputs
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Full history + initialized submodule so z.py can advance the
+          # llvm gitlink and create-pull-request can commit the bump.
+          fetch-depth: 0
+          submodules: recursive
+
+      # z.py resolves the llvm branch tip (the single coupling anchor),
+      # reads the Nanvix libc release that tip's `z` script targets, and pins
+      # BOTH libc.lock and the submodule gitlink to that one commit. Deriving
+      # the libc pin from the fork tip keeps the two SDK halves from skewing.
+      # changed / tag / updated_vars are published to $GITHUB_OUTPUT so the PR
+      # step below only runs when something actually moved. GH_TOKEN raises the
+      # GitHub API rate limit and authorizes the submodule fetch.
+      - name: Bump pinned inputs
+        id: update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./z.py update --no-dry-run --provider c-clang
+
+      # Create the PR with a PAT (DISPATCH_TOKEN), not the default GITHUB_TOKEN:
+      # GitHub suppresses workflow triggers for events raised by GITHUB_TOKEN to
+      # prevent recursive runs, so a PR opened with it never fires the CI
+      # Pipeline -- the `build` check stays `action_required` and the PR is
+      # un-mergeable (UNSTABLE). A PAT makes the created PR trigger CI normally.
+      # DISPATCH_TOKEN is an existing org secret already provisioned for
+      # triggering workflows, so no new secret is needed. See
+      # peter-evans/create-pull-request docs.
+      - name: Open bump pull request
+        if: steps.update.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          commit-message: "chore(sdk): bump toolchain inputs (${{ steps.update.outputs.updated_vars }})"
+          branch: "update/toolchain-${{ steps.update.outputs.tag }}"
+          title: "Bump toolchain inputs to ${{ steps.update.outputs.tag }}"
+          body: |
+            Automated bump of the pinned SDK toolchain inputs.
+
+            - libc release (`nanvix/nanvix`): **${{ steps.update.outputs.tag }}**
+            - Updated pins: `${{ steps.update.outputs.updated_vars }}`
+
+            Both halves are pinned from the same `providers/c-clang/llvm`
+            branch tip: libc.lock is set to the release that tip's `z` script
+            targets (`NANVIX_RELEASE_TAG`), so the LLVM and libc pins stay
+            coupled. Generated automatically by the update workflow
+            (`.github/workflows/update.yml`).
+          base: dev
+          labels: automated,update
+          assignees: ${{ env.PR_ASSIGNEES }}

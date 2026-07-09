@@ -1,0 +1,78 @@
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+
+name: Set up SDK build environment
+description: >-
+  Shared runner preparation for building the c-clang SDK image: reclaim disk
+  space, create a docker-container Buildx builder with uncapped BuildKit logs,
+  and restore + inject the LLVM sccache into the builder's cache mount.
+
+inputs:
+  sccache-key:
+    description: Exact actions/cache key for the sccache-cache directory.
+    required: true
+  sccache-restore-keys:
+    description: Newline-separated actions/cache restore-keys (prefix fallbacks).
+    required: true
+
+outputs:
+  builder:
+    description: Name of the Buildx builder to pass to z.py --builder.
+    value: ${{ steps.buildx.outputs.name }}
+
+runs:
+  using: composite
+  steps:
+    # GitHub-hosted runners start with only ~20 GB free on / and ship ~25-30 GB
+    # of preinstalled toolchains this build never uses. The c-clang image bundles
+    # the whole LLVM toolchain; exporting/loading it in the build step exhausts
+    # the runner disk ("no space left on device") unless that space is reclaimed
+    # first. Print df for / and /mnt (before and after) so the logs show which
+    # filesystem is the tight one.
+    - name: Free up runner disk space
+      shell: bash
+      run: |
+        echo "== disk before cleanup =="
+        df -h / /mnt 2>/dev/null || df -h /
+        sudo rm -rf /usr/local/lib/android || true
+        sudo rm -rf /usr/share/dotnet || true
+        sudo rm -rf /opt/ghc /usr/local/.ghcup || true
+        sudo rm -rf /usr/local/share/boost || true
+        sudo rm -rf /usr/share/swift || true
+        sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+        echo "== disk after cleanup =="
+        df -h / /mnt 2>/dev/null || df -h /
+
+    # The image build compiles the whole LLVM toolchain and caches the object
+    # files with sccache in a BuildKit cache mount (SCCACHE_DIR=/sccache in the
+    # Dockerfile). That mount lives only in the builder, so it is persisted
+    # across runs with actions/cache + buildkit-cache-dance -- without it every
+    # run recompiles LLVM from scratch. The dance needs a docker-container
+    # builder, created here; its env driver-opts uncap BuildKit's per-step log
+    # limits (default 2MiB / 200KiB-s) so the full verbose LLVM compile stays in
+    # the job log.
+    - name: Set up Docker Buildx
+      id: buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        driver-opts: |
+          env.BUILDKIT_STEP_LOG_MAX_SIZE=-1
+          env.BUILDKIT_STEP_LOG_MAX_SPEED=-1
+
+    - name: Restore sccache cache
+      id: sccache
+      uses: actions/cache@v4
+      with:
+        path: sccache-cache
+        key: ${{ inputs.sccache-key }}
+        restore-keys: ${{ inputs.sccache-restore-keys }}
+
+    - name: Inject sccache into the buildx cache mount
+      uses: reproducible-containers/buildkit-cache-dance@v3
+      with:
+        builder: ${{ steps.buildx.outputs.name }}
+        cache-map: |
+          {
+            "sccache-cache": "/sccache"
+          }
+        skip-extraction: ${{ steps.sccache.outputs.cache-hit }}

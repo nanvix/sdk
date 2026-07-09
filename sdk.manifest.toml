@@ -1,0 +1,39 @@
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+#
+# sdk.manifest.toml -- the umbrella that composes a coherent SDK release.
+#
+# Pins the concrete IMAGE TAGS of every provider and layer that ship together
+# under a single `sdk_version`. The umbrella tag
+# `ghcr.io/nanvix/nanvix-sdk:<sdk_version>` is an alias for this set. Each
+# referenced image also carries its own per-artifact manifest
+# (/opt/nanvix/nanvix-sdk.json + OCI labels), validated against
+# schema/nanvix-sdk.schema.json.
+#
+# The concrete image tags/digests below are pinned by `z.py release`, which
+# writes them back after building and pushing each image.
+
+schema_version = 1
+
+# Public coordinate downstream ports depend on (the published image tag).
+sdk_version = "0.0.0-dev"
+
+# Registry namespace for all SDK images.
+registry = "ghcr.io/nanvix"
+
+# Umbrella image aliasing the provider/layer set below.
+[umbrella]
+image = "ghcr.io/nanvix/nanvix-sdk"
+# tag/digest filled at release time.
+
+# ---------------------------------------------------------------------------
+# C SDK role -- providers presenting the shared C ABI from libc.lock.
+# ---------------------------------------------------------------------------
+[providers.c-clang]
+role = "c"
+provider = "clang"
+image = "ghcr.io/nanvix/nanvix-sdk-c-clang"
+# tag/digest filled at release time.
+
+# Additional providers (and language layers) register here as they are added;
+# see doc/adding-a-provider.md and doc/adding-a-layer.md.

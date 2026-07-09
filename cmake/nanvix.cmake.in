@@ -1,0 +1,45 @@
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+#
+# CMake toolchain file for cross-compiling to Nanvix with the Nanvix SDK.
+#
+# This is a TEMPLATE: providers/c-clang/build.py fills the @VAR@ placeholders
+# and installs the result as @INSTALL_PREFIX@/nanvix.cmake inside the SDK image.
+# Consumers pass it directly as
+# -DCMAKE_TOOLCHAIN_FILE=@INSTALL_PREFIX@/nanvix.cmake.
+#
+# SDK version: @SDK_VERSION@   |   C ABI: @C_ABI@
+
+set(CMAKE_SYSTEM_NAME Nanvix)
+set(CMAKE_SYSTEM_PROCESSOR i686)
+
+set(NANVIX_SDK_PREFIX "@INSTALL_PREFIX@")
+set(NANVIX_TARGET_TRIPLE "@TARGET_TRIPLE@")
+set(NANVIX_TARGET_ALIAS "@TARGET_ALIAS@")
+
+# Sysroot == install prefix: headers (usr/include, include/c++/v1) and the
+# archives (crt0.o/libc.a/libc++.a/user.ld/...) all live under the prefix.
+set(CMAKE_SYSROOT "${NANVIX_SDK_PREFIX}")
+
+# Toolchain binaries.
+set(CMAKE_C_COMPILER   "${NANVIX_SDK_PREFIX}/bin/clang")
+set(CMAKE_CXX_COMPILER "${NANVIX_SDK_PREFIX}/bin/clang++")
+set(CMAKE_ASM_COMPILER "${NANVIX_SDK_PREFIX}/bin/clang")
+set(CMAKE_AR           "${NANVIX_SDK_PREFIX}/bin/llvm-ar")
+set(CMAKE_RANLIB       "${NANVIX_SDK_PREFIX}/bin/llvm-ranlib")
+
+# Always cross-compile to the Nanvix triple.
+set(CMAKE_C_COMPILER_TARGET   "${NANVIX_TARGET_TRIPLE}")
+set(CMAKE_CXX_COMPILER_TARGET "${NANVIX_TARGET_TRIPLE}")
+set(CMAKE_ASM_COMPILER_TARGET "${NANVIX_TARGET_TRIPLE}")
+
+# Nanvix links static ELF only (no dynamic loader); the Clang driver enforces
+# -Bstatic and the other link constraints, so nothing extra is needed here.
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
+# Search rules: programs from the host, libraries/headers from the sysroot.
+set(CMAKE_FIND_ROOT_PATH "${NANVIX_SDK_PREFIX}")
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)

@@ -1,0 +1,19 @@
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+
+# Build / staging output produced by z.py.
+/build/
+/dist/
+
+# Resolved/pulled SDK artifacts and local caches.
+/.cache/
+*.tar.zst
+*.tar.bz2
+
+# Python bytecode.
+__pycache__/
+*.pyc
+
+# Editor / OS noise.
+*.swp
+.DS_Store
