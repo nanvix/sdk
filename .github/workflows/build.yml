@@ -1,0 +1,68 @@
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+
+name: CI Pipeline
+
+#==================================================================================================
+# Trigger Conditions
+#==================================================================================================
+
+on:
+  pull_request:
+    types:
+      - 'opened'
+      - 'synchronize'
+      - 'reopened'
+      - 'ready_for_review'
+    branches:
+      - 'dev'
+
+# Cancel previous running actions for the same PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/dev' }}
+
+#==================================================================================================
+# Jobs
+#==================================================================================================
+
+jobs:
+  build:
+    if: |
+      github.event_name != 'pull_request' ||
+      !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Reclaim runner disk space, stand up the docker-container Buildx builder
+      # (uncapped BuildKit logs), and restore + inject the LLVM sccache into its
+      # cache mount -- shared with the release pipeline via the composite action
+      # in .github/actions/setup-build-env so both jobs prep the runner alike.
+      - name: Set up build environment
+        id: setup
+        uses: ./.github/actions/setup-build-env
+        with:
+          sccache-key: ${{ runner.os }}-sccache-c-clang-${{ github.sha }}
+          sccache-restore-keys: |
+            ${{ runner.os }}-sccache-c-clang-
+
+      # Every image is built from source from the pinned submodule, so the image
+      # verified here is identical to what a release publishes (see
+      # doc/versioning.md).
+      - name: Build c-clang SDK image
+        run: |
+          ./z.py build-image --no-dry-run \
+            --provider c-clang \
+            --builder ${{ steps.setup.outputs.builder }} \
+            --tag ci-${{ github.sha }}
+
+      - name: Verify (canary build inside the image)
+        run: |
+          ./z.py verify --no-dry-run \
+            --provider c-clang \
+            --image ghcr.io/nanvix/nanvix-sdk-c-clang:ci-${{ github.sha }}

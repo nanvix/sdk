@@ -1,0 +1,3 @@
+[submodule "providers/c-clang/llvm"]
+	path = providers/c-clang/llvm
+	url = https://github.com:nanvix/llvm

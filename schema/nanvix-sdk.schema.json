@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/nanvix/nanvix-sdk/dev/schema/nanvix-sdk.schema.json",
+  "title": "Nanvix SDK artifact manifest",
+  "description": "Per-artifact provenance + compatibility manifest, written to /opt/nanvix/nanvix-sdk.json inside each SDK image and mirrored as dev.nanvix.sdk.* OCI labels.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "role",
+    "provider",
+    "sdk_version",
+    "target",
+    "toolchain",
+    "libc",
+    "compat",
+    "features"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "role": {
+      "type": "string",
+      "description": "SDK role this artifact fills.",
+      "enum": [
+        "c"
+      ]
+    },
+    "provider": {
+      "type": "string",
+      "description": "Concrete provider implementing the role.",
+      "examples": [
+        "clang",
+        "gcc"
+      ]
+    },
+    "sdk_version": {
+      "type": "string",
+      "description": "Public SDK coordinate / image tag."
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "triple",
+        "alias"
+      ],
+      "properties": {
+        "triple": {
+          "type": "string",
+          "examples": [
+            "i686-unknown-nanvix"
+          ]
+        },
+        "alias": {
+          "type": "string",
+          "examples": [
+            "i686-nanvix"
+          ]
+        }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "llvm_version",
+        "llvm_commit",
+        "port_branch"
+      ],
+      "properties": {
+        "llvm_version": {
+          "type": "string",
+          "examples": [
+            "22.1.8"
+          ]
+        },
+        "llvm_commit": {
+          "type": "string",
+          "description": "Pinned providers/c-clang/llvm submodule commit.",
+          "pattern": "^([0-9a-f]{7,40})?$"
+        },
+        "port_branch": {
+          "type": "string",
+          "examples": [
+            "nanvix/v22.1.8"
+          ]
+        }
+      }
+    },
+    "libc": {
+      "type": "object",
+      "description": "Snapshot of the libc.lock the image was built against.",
+      "additionalProperties": false,
+      "required": [
+        "nanvix_tag"
+      ],
+      "properties": {
+        "nanvix_tag": {
+          "type": "string"
+        },
+        "nanvix_commit": {
+          "type": "string"
+        },
+        "sysroot_sha256": {
+          "type": "string"
+        }
+      }
+    },
+    "compat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "c_abi",
+        "cxx_abi",
+        "abi",
+        "min_nanvix_os"
+      ],
+      "properties": {
+        "c_abi": {
+          "type": "string",
+          "examples": [
+            "i686-nanvix-sysv-1"
+          ]
+        },
+        "cxx_abi": {
+          "type": "string",
+          "description": "C++ runtime ABI; standardized on libc++ across providers.",
+          "examples": [
+            "libc++"
+          ]
+        },
+        "abi": {
+          "type": "string",
+          "description": "Binary format / linkage contract.",
+          "examples": [
+            "static-elf"
+          ]
+        },
+        "min_nanvix_os": {
+          "type": "string"
+        }
+      }
+    },
+    "features": {
+      "type": "object",
+      "description": "Machine-readable capability gates (replacing prose per-release notes).",
+      "additionalProperties": false,
+      "properties": {
+        "localization": {
+          "type": "boolean"
+        },
+        "filesystem": {
+          "type": "boolean"
+        },
+        "wide_chars": {
+          "type": "boolean"
+        },
+        "compiler_rt": {
+          "type": "string",
+          "enum": [
+            "builtins-only",
+            "full"
+          ]
+        },
+        "dynamic_loader": {
+          "type": "boolean"
+        }
+      }
+    },
+    "requires": {
+      "type": "object",
+      "description": "Capabilities a layer requires from the provider it is built FROM.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/nanvix/nanvix-sdk/dev/schema/libc.lock.schema.json",
+  "title": "Nanvix SDK libc.lock",
+  "description": "The Nanvix libc half of the SDK coupling, shared across all C providers. Serialized as TOML in libc.lock.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "nanvix_tag",
+    "release_pattern",
+    "c_abi",
+    "min_nanvix_os"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "nanvix_tag": {
+      "type": "string",
+      "description": "Nanvix libc release tag, injected as Z_NANVIX_RELEASE_TAG.",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+"
+    },
+    "nanvix_commit": {
+      "type": "string",
+      "description": "Exact commit the tag resolves to (empty until first real pin).",
+      "pattern": "^([0-9a-f]{7,40})?$"
+    },
+    "release_pattern": {
+      "type": "string",
+      "description": "Glob for the release asset staged into the sysroot."
+    },
+    "sysroot_sha256": {
+      "type": "string",
+      "description": "SHA-256 of the staged sysroot tarball (empty until first build).",
+      "pattern": "^([0-9a-f]{64})?$"
+    },
+    "c_abi": {
+      "type": "string",
+      "description": "C ABI epoch string; the interop contract every C provider satisfies.",
+      "examples": ["i686-nanvix-sysv-1"]
+    },
+    "min_nanvix_os": {
+      "type": "string",
+      "description": "Minimum Nanvix OS version this libc requires.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"
+    }
+  }
+}

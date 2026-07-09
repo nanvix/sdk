@@ -1,0 +1,44 @@
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+#
+# provider.toml -- descriptor for the c-clang C SDK provider.
+#
+# Declares how this provider fills the `c` role and the compat keys it stamps
+# into each image's nanvix-sdk.json / OCI labels. The libc pin is shared and
+# lives in the top-level libc.lock; the LLVM pin is the llvm submodule
+# commit under this directory.
+
+schema_version = 1
+
+role = "c"
+provider = "clang"
+
+# Published image (tag supplied by z.py at build/release time).
+image = "ghcr.io/nanvix/nanvix-sdk-c-clang"
+
+[target]
+triple = "i686-unknown-nanvix"
+alias = "i686-nanvix"
+prefix = "/opt/nanvix"
+
+[toolchain]
+# Source of truth is the providers/c-clang/llvm submodule; these are
+# mirrored into the manifest for provenance.
+port_branch = "nanvix/v22.1.8"
+llvm_version = "22.1.8"
+llvm_commit = ""               # Resolved from the submodule at build time (NANVIX_LLVM_COMMIT); blank here.
+
+[compat]
+c_abi = "i686-nanvix-sysv-1" # must match libc.lock
+cxx_abi = "libc++"           # standardized across all providers
+abi = "static-elf"
+
+# Capability gates baked into the image manifest. Mirrors the current
+# llvm/.nanvix "Known Limitations": builtins-only compiler-rt and no
+# dynamic loader; libc++ ships with full localization/filesystem/wide chars.
+[features]
+localization = true
+filesystem = true
+wide_chars = true
+compiler_rt = "builtins-only"
+dynamic_loader = false

@@ -1,0 +1,5 @@
+# Keep the Docker build context lean. The toolchain source is COPYed from the
+# providers/c-clang/llvm submodule, but git metadata and CI files are
+# never needed inside the image.
+**/.git
+**/.github

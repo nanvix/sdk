@@ -1,0 +1,83 @@
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+
+name: Release Pipeline
+
+#==================================================================================================
+# Trigger Conditions
+#==================================================================================================
+
+on:
+  # Releases are cut from tags only. The tag pipeline
+  # (.github/workflows/tag.yml) auto-creates the v<nanvix>-sdk.<N> tag on pushes
+  # to dev, and that tag push is what triggers this build + publish. Building on
+  # the dev branch too would double every (expensive) LLVM build, so dev is not a
+  # trigger here.
+  push:
+    tags:
+      - 'v*'
+
+# Serialize releases.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+#==================================================================================================
+# Permissions
+#==================================================================================================
+
+permissions:
+  contents: read
+  packages: write
+
+#==================================================================================================
+# Jobs
+#==================================================================================================
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Reclaim runner disk space, stand up the docker-container Buildx builder
+      # (uncapped BuildKit logs), and restore + inject the LLVM sccache into its
+      # cache mount -- shared with the CI pipeline via the composite action in
+      # .github/actions/setup-build-env so a release does not recompile the whole
+      # toolchain from scratch.
+      - name: Set up build environment
+        id: setup
+        uses: ./.github/actions/setup-build-env
+        with:
+          sccache-key: ${{ runner.os }}-sccache-c-clang-release-${{ github.sha }}
+          sccache-restore-keys: |
+            ${{ runner.os }}-sccache-c-clang-release-
+            ${{ runner.os }}-sccache-c-clang-
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The version is the pushed tag (v<nanvix>-sdk.<N>), auto-created by the
+      # tag pipeline (.github/workflows/tag.yml). Release builds LLVM from the
+      # pinned submodule (the only build path), then pushes the provider image
+      # plus the umbrella ghcr.io/nanvix/nanvix-sdk:<version> alias, each
+      # carrying the nanvix-sdk.json manifest + OCI labels.
+      - name: Build and push c-clang SDK image
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          ./z.py release --no-dry-run --version "${VERSION}" \
+            --provider c-clang --push \
+            --builder ${{ steps.setup.outputs.builder }}
+
+      - name: Verify pushed image
+        run: |
+          ./z.py verify --no-dry-run --version "${GITHUB_REF_NAME}" \
+            --provider c-clang
