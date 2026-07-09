@@ -1,0 +1,94 @@
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+
+name: Tag Pipeline
+
+#==================================================================================================
+# Trigger Conditions
+#==================================================================================================
+
+on:
+  # Every push to dev (a merged bump/packaging PR) is a candidate release. The
+  # job below decides whether the change is release-affecting and, if so, cuts
+  # the next v<nanvix>-sdk.<N> tag -- which then fires the Release pipeline.
+  push:
+    branches:
+      - 'dev'
+  # Manual cut: `force` mints a release even when nothing release-affecting
+  # changed (e.g. to re-publish after an infra fix).
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Cut a release even if no release-affecting input changed.'
+        type: boolean
+        default: false
+
+# Serialize tag cuts so two pushes cannot race on the revision number: the
+# second run sees the first run's pushed tag before computing the next -sdk.N.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+#==================================================================================================
+# Permissions
+#==================================================================================================
+
+permissions:
+  contents: write
+
+#==================================================================================================
+# Jobs
+#==================================================================================================
+
+jobs:
+  tag:
+    name: Cut the next SDK release tag
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Full history + tags so z.py plan-release can `git describe` the last
+          # v*-sdk.* tag and diff the release inputs against it. Submodules are
+          # not initialized: the diff only reads the llvm gitlink SHA,
+          # which lives in the superproject tree.
+          fetch-depth: 0
+          # Push the tag with a PAT, not GITHUB_TOKEN: GitHub suppresses workflow
+          # triggers for refs pushed with GITHUB_TOKEN (anti-recursion), so a tag
+          # pushed with it would never fire the Release pipeline. DISPATCH_TOKEN
+          # is an existing org PAT already used by the update workflow.
+          token: ${{ secrets.DISPATCH_TOKEN }}
+
+      # Derive the next version from libc.lock's nanvix_tag + the existing tags,
+      # and decide whether the change since the last tag warrants a release.
+      # Publishes should_release / version to $GITHUB_OUTPUT. No network or
+      # Docker: this is a fast, local git-only step.
+      - name: Plan the next SDK release
+        id: plan
+        env:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
+        run: |
+          FORCE_FLAG=""
+          if [ "${FORCE}" = "true" ]; then
+            FORCE_FLAG="--force"
+          fi
+          ./z.py plan-release --no-dry-run ${FORCE_FLAG}
+
+      # Create the annotated tag and push it. The push (authenticated with the
+      # PAT persisted by checkout) is what triggers release.yml on the tag ref.
+      - name: Create and push the release tag
+        if: steps.plan.outputs.should_release == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          REASON: ${{ steps.plan.outputs.reason }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
+            echo "tag ${VERSION} already exists; nothing to do"
+            exit 0
+          fi
+          git config user.name  'nanvix-bot'
+          git config user.email 'bot@nanvix.dev'
+          git tag -a "${VERSION}" -m "Nanvix SDK ${VERSION} (${REASON})"
+          git push origin "refs/tags/${VERSION}"
+          echo "Cut ${VERSION} (${REASON})" >> "${GITHUB_STEP_SUMMARY}"

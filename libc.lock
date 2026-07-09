@@ -1,0 +1,47 @@
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+#
+# libc.lock -- the Nanvix libc half of the SDK coupling.
+#
+# SHARED across every C provider (clang, future gcc): all C providers stage the
+# same libc into the same sysroot so they present one, identical C ABI. The LLVM
+# half of the coupling is pinned separately by the
+# `providers/c-clang/llvm` submodule commit.
+#
+# `nanvix_tag` is injected into the toolchain build as `Z_NANVIX_RELEASE_TAG`,
+# which downloads the matching Nanvix release tarball and stages it into the
+# sysroot. Bumping any value here is a reviewed commit that yields a new SDK
+# image version.
+#
+# Validated against schema/libc.lock.schema.json.
+
+schema_version = 1
+
+# ---------------------------------------------------------------------------
+# Nanvix libc release pin.
+# ---------------------------------------------------------------------------
+# Release tag consumed as Z_NANVIX_RELEASE_TAG by llvm/z (stage 1).
+nanvix_tag = "v0.19.9"
+
+# Exact commit the tag resolves to.
+nanvix_commit = "001e182e32a921ac3bd3f7a3cbe9b665269f9215"
+
+# Asset name glob inside the release (matches llvm/z NANVIX_RELEASE_PATTERN).
+release_pattern = "nanvix-x86-microvm-standalone-release-*.tar.bz2"
+
+# SHA-256 of the staged sysroot tarball, for reproducible/verifiable builds.
+# Recorded by `z.py release` from the built image's manifest; blank until the
+# first image of this pin is cut, then committed as part of the release review.
+sysroot_sha256 = ""
+
+# ---------------------------------------------------------------------------
+# ABI / compatibility keys.
+# ---------------------------------------------------------------------------
+# C ABI epoch: the interop contract every C provider must satisfy. Bump the
+# trailing epoch only on a breaking libc/syscall ABI change.
+c_abi = "i686-nanvix-sysv-1"
+
+# Minimum Nanvix OS version whose kernel/syscall surface this libc requires.
+# Reviewed whenever `nanvix_tag` is bumped; surfaced in every image manifest and
+# as the dev.nanvix.sdk.compat.min_nanvix_os label.
+min_nanvix_os = "0.19.9"
