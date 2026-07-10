@@ -90,14 +90,19 @@ RUN --mount=type=secret,id=gh_token,env=GH_TOKEN,required=false \
     set -eux; \
     # Fetch the pinned Nanvix libc release up front (fail fast). The token, when
     # present, is written to a curl config file (never traced) and only raises
-    # the GitHub API rate limit for the metadata lookup.
+    # the GitHub API rate limit for the metadata lookup. The restrictive umask
+    # that protects that secret file is confined to a subshell so it does NOT
+    # leak into the toolchain staging below: otherwise every directory created
+    # while installing into ${INSTALL_LOCATION} inherits mode 0700, and a
+    # `docker run --user` consumer can no longer traverse /opt/nanvix/bin (or
+    # /opt/nanvix/lib) to exec the toolchain.
     set +x; \
-    umask 077; \
-    if [ -n "${GH_TOKEN:-}" ]; then \
-        printf 'header = "Authorization: Bearer %s"\n' "${GH_TOKEN}" > /tmp/gh.curlrc; \
-    else \
-        : > /tmp/gh.curlrc; \
-    fi; \
+    ( umask 077; \
+      if [ -n "${GH_TOKEN:-}" ]; then \
+          printf 'header = "Authorization: Bearer %s"\n' "${GH_TOKEN}" > /tmp/gh.curlrc; \
+      else \
+          : > /tmp/gh.curlrc; \
+      fi ); \
     set -x; \
     asset_url="$(curl -fsSL -K /tmp/gh.curlrc \
         "https://api.github.com/repos/nanvix/nanvix/releases/tags/${NANVIX_RELEASE_TAG}" \
