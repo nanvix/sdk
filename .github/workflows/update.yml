@@ -30,6 +30,11 @@ env:
   # author"), so the maintainer is assigned rather than requested as a reviewer.
   PR_ASSIGNEES: ppenna
 
+  # Safety cap (in seconds) for how long to wait on the dev sccache-warming
+  # build before opening the PR anyway. Set generously above a cold LLVM build
+  # (default: 2h). Bump this if warming builds start exceeding it.
+  WARMING_BUILD_TIMEOUT_SECONDS: 7200
+
 #==================================================================================================
 # Jobs
 #==================================================================================================
@@ -42,6 +47,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # Read Actions runs so the wait-for-warming-build step below can poll the
+      # dev CI run status via the gh CLI before opening the PR.
+      actions: read
 
     steps:
       - name: Checkout code
@@ -65,6 +73,59 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ./z.py update --no-dry-run --provider c-clang
+
+      # Guard against the LLVM sccache producer/consumer race. The bump PR we are
+      # about to open rebuilds the whole toolchain in CI, and that PR build can
+      # only restore the shared LLVM sccache once the dev-push "warming" build
+      # (.github/workflows/build.yml) for the current dev HEAD has finished and
+      # saved it in the default-branch cache scope. GitHub scopes caches by ref,
+      # so a PR sees only its own refs/pull/N/merge scope plus the dev scope; if
+      # we open the PR while that warming build is still compiling LLVM, the PR
+      # CI starts, finds an empty dev scope ("Cache not found"), and rebuilds the
+      # toolchain from scratch. Block here until the warming run for github.sha
+      # reaches a terminal state so the dev-scope sccache exists first.
+      - name: Wait for the dev sccache-warming build
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # (databaseId, status, conclusion) of the newest dev-push CI run whose
+          # head commit is the dev HEAD this bump is based on; empty if none.
+          warming_run() {
+            gh run list --workflow build.yml --branch dev --event push \
+              --limit 20 --json databaseId,headSha,status,conclusion \
+              --jq "map(select(.headSha == \"${HEAD_SHA}\")) | first
+                    | select(. != null)
+                    | [.databaseId, .status, .conclusion] | @tsv"
+          }
+
+          echo "Waiting for the dev sccache-warming build of ${HEAD_SHA}..."
+          deadline=$(( $(date +%s) + WARMING_BUILD_TIMEOUT_SECONDS ))   # safety cap (> a cold build)
+          while :; do
+            row="$(warming_run || true)"
+            if [ -z "${row}" ]; then
+              echo "No dev-push CI run found for ${HEAD_SHA}; nothing to wait for."
+              break
+            fi
+
+            id="$(printf '%s' "${row}" | cut -f1)"
+            status="$(printf '%s' "${row}" | cut -f2)"
+            conclusion="$(printf '%s' "${row}" | cut -f3)"
+            echo "  warming run ${id}: status=${status} conclusion=${conclusion}"
+
+            if [ "${status}" = "completed" ]; then
+              echo "Warming build finished (${conclusion}); dev-scope sccache is saved."
+              break
+            fi
+            if [ "$(date +%s)" -ge "${deadline}" ]; then
+              echo "::warning::Timed out waiting for warming run ${id}; opening PR anyway."
+              break
+            fi
+            sleep 30
+          done
 
       # Create the PR with a PAT (DISPATCH_TOKEN), not the default GITHUB_TOKEN:
       # GitHub suppresses workflow triggers for events raised by GITHUB_TOKEN to
