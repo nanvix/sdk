@@ -8,12 +8,23 @@ name: CI Pipeline
 #==================================================================================================
 
 on:
+  # Pull requests validate every change before it lands on dev.
   pull_request:
     types:
       - 'opened'
       - 'synchronize'
       - 'reopened'
       - 'ready_for_review'
+    branches:
+      - 'dev'
+  # A push to dev (a merged PR) rebuilds and -- crucially -- saves the LLVM
+  # sccache in the default-branch cache scope. GitHub quarantines pull_request
+  # caches to their own merge ref, so neither another PR nor the tag-triggered
+  # release can restore a cache a PR saved. Only a cache written by a trusted
+  # event on the default branch is visible to both, so this dev build is what
+  # keeps the shared sccache warm for later PRs and releases; the sccache in turn
+  # keeps each rebuild largely incremental.
+  push:
     branches:
       - 'dev'
 
