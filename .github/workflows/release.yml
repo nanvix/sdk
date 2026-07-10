@@ -10,9 +10,11 @@ name: Release Pipeline
 on:
   # Releases are cut from tags only. The tag pipeline
   # (.github/workflows/tag.yml) auto-creates the v<nanvix>-sdk.<N> tag on pushes
-  # to dev, and that tag push is what triggers this build + publish. Building on
-  # the dev branch too would double every (expensive) LLVM build, so dev is not a
-  # trigger here.
+  # to dev, and that tag push is what triggers this build + publish. The build
+  # restores the LLVM sccache the CI pipeline warms on the dev branch (see
+  # .github/workflows/build.yml): a cache written by a trusted push to the
+  # default branch is the only one a tag run is allowed to restore, so a release
+  # reuses that toolchain instead of recompiling it from scratch.
   push:
     tags:
       - 'v*'
