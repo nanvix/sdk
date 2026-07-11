@@ -10,7 +10,9 @@
 # Success proves the image is a self-contained cross-toolchain.
 #
 # Usage (from the repo, via z.py):   ./z.py verify
-# Or directly:                       docker run --rm -v "$PWD/tests/canary:/work" \
+# Or directly:                       docker run --rm \
+#                                        --user "$(id -u):$(id -g)" \
+#                                        -v "$PWD/tests/canary:/work" \
 #                                        -w /work <image> sh ./run.sh
 #
 

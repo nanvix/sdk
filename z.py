@@ -769,8 +769,14 @@ def cmd_verify(args: argparse.Namespace) -> None:
     canary = REPO_ROOT / "tests" / "canary"
     info(f"verifying {image} against {canary}")
     # Mount tests/canary into the built image and compile it there with docker.
-    cmd = [
-        "docker", "run", "--rm",
+    # Run as a non-root user (mirroring how nanvix-zutil drives the image with
+    # `--user`) so this exercises the `docker run --user` consumption path and
+    # fails if the prefix was installed root-only: a root canary would happily
+    # traverse a 0700 /opt/nanvix and silently miss that regression.
+    cmd = ["docker", "run", "--rm"]
+    if hasattr(os, "getuid") and hasattr(os, "getgid"):
+        cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
+    cmd += [
         "-v", f"{canary}:/work", "-w", "/work",
         image, "sh", "./run.sh",
     ]
