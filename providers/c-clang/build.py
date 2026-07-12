@@ -43,6 +43,16 @@ def build_manifest(provider: dict, libc: dict) -> dict:
     compat = provider.get("compat", {})
     features = provider.get("features", {})
 
+    nanvix_tag = libc.get("nanvix_tag", "")
+    nanvix_version = nanvix_tag[1:] if nanvix_tag.startswith("v") else ""
+    pinned_sysroot = libc.get("sysroot_sha256", "")
+    actual_sysroot = os.environ.get("NANVIX_SYSROOT_SHA256", pinned_sysroot)
+    if pinned_sysroot and actual_sysroot != pinned_sysroot:
+        raise ValueError(
+            "staged sysroot digest does not match libc.lock: "
+            f"{actual_sysroot} != {pinned_sysroot}"
+        )
+
     return {
         "schema_version": 1,
         "role": provider["role"],
@@ -60,9 +70,10 @@ def build_manifest(provider: dict, libc: dict) -> dict:
             "port_branch": toolchain.get("port_branch", ""),
         },
         "libc": {
-            "nanvix_tag": libc.get("nanvix_tag", ""),
+            "nanvix_tag": nanvix_tag,
+            "nanvix_version": nanvix_version,
             "nanvix_commit": libc.get("nanvix_commit", ""),
-            "sysroot_sha256": os.environ.get("NANVIX_SYSROOT_SHA256", libc.get("sysroot_sha256", "")),
+            "sysroot_sha256": actual_sysroot,
         },
         "compat": {
             "c_abi": compat.get("c_abi", libc.get("c_abi", "")),

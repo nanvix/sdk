@@ -24,6 +24,10 @@ ghcr.io/nanvix/nanvix-sdk:<version>             # umbrella tag for a coherent re
 
 The compatibility/provenance manifest is embedded in each image **both** as OCI
 labels (`dev.nanvix.sdk.*`) and as the file `/opt/nanvix/nanvix-sdk.json`.
+After successful pushed-image verification, the tag's GitHub Release carries
+the authoritative machine-readable `sdk-release.json` contract. A Git tag alone
+is not a publication-complete signal; see
+[`doc/release-contract.md`](doc/release-contract.md).
 An optional relocatable tarball (`nanvix-sdk-<ver>-<host>.tar.zst`) is a
 secondary output for native / non-Docker use.
 

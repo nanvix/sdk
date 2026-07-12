@@ -95,11 +95,18 @@
       "description": "Snapshot of the libc.lock the image was built against.",
       "additionalProperties": false,
       "required": [
-        "nanvix_tag"
+        "nanvix_tag",
+        "nanvix_version",
+        "nanvix_commit",
+        "sysroot_sha256"
       ],
       "properties": {
         "nanvix_tag": {
           "type": "string"
+        },
+        "nanvix_version": {
+          "type": "string",
+          "description": "Nanvix release version derived from nanvix_tag by removing its leading v."
         },
         "nanvix_commit": {
           "type": "string"

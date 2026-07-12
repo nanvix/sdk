@@ -4,6 +4,7 @@
 # Build / staging output produced by z.py.
 /build/
 /dist/
+/sdk-release.json
 
 # Resolved/pulled SDK artifacts and local caches.
 /.cache/

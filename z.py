@@ -19,6 +19,8 @@ Usage:
     ./z.py build-image [--provider c-clang]   Build a provider/layer SDK image
     ./z.py verify [--image IMG]               Build tests/canary INSIDE the image
     ./z.py release [--push]                   Build + tag + push + write manifest
+    ./z.py generate-contract --digest DIGEST  Write verified sdk-release.json
+    ./z.py verify-contract                    Re-verify an sdk-release.json
     ./z.py show [--provider c-clang]          Print the artifact manifest
     ./z.py update [--provider c-clang]        Bump pinned inputs to latest upstream
     ./z.py plan-release [--force]             Decide the next SDK release tag
@@ -55,6 +57,8 @@ LAYERS_DIR = REPO_ROOT / "layers"
 SCHEMA_DIR = REPO_ROOT / "schema"
 GITMODULES = REPO_ROOT / ".gitmodules"
 REGISTRY = "ghcr.io/nanvix"
+DEFAULT_CONTRACT = REPO_ROOT / "sdk-release.json"
+DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 # Repo paths whose contents determine the built image. A release tag is cut only
 # when one of these changed since the last tag, so doc/test/workflow-only pushes
@@ -239,6 +243,10 @@ def parse_gitmodules() -> dict[str, dict[str, str]]:
 
 def submodule_commit(path: Path) -> str:
     """Resolve the checked-out submodule HEAD, or "" if unavailable."""
+    # Without this guard, `git -C` in an empty, uninitialized submodule
+    # directory walks up and incorrectly returns the SDK repository's HEAD.
+    if not (path / ".git").exists():
+        return ""
     try:
         out = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "HEAD"],
@@ -255,6 +263,8 @@ def compose_manifest(provider: dict[str, Any], libc: dict[str, Any],
     target = provider.get("target", {})
     toolchain = provider.get("toolchain", {})
     compat = provider.get("compat", {})
+    nanvix_tag = cast("str", libc.get("nanvix_tag", ""))
+    nanvix_version = nanvix_tag[1:] if nanvix_tag.startswith("v") else ""
     return {
         "schema_version": 1,
         "role": provider.get("role"),
@@ -270,7 +280,8 @@ def compose_manifest(provider: dict[str, Any], libc: dict[str, Any],
             "port_branch": toolchain.get("port_branch", ""),
         },
         "libc": {
-            "nanvix_tag": libc.get("nanvix_tag", ""),
+            "nanvix_tag": nanvix_tag,
+            "nanvix_version": nanvix_version,
             "nanvix_commit": libc.get("nanvix_commit", ""),
             "sysroot_sha256": libc.get("sysroot_sha256", ""),
         },
@@ -284,15 +295,8 @@ def compose_manifest(provider: dict[str, Any], libc: dict[str, Any],
     }
 
 
-def manifest_labels(manifest: dict[str, Any]) -> list[str]:
-    """Flatten the composed manifest into `--label dev.nanvix.sdk.*` build args.
-
-    Mirrors /opt/nanvix/nanvix-sdk.json onto OCI labels so consumers can resolve
-    provenance/compatibility with a plain `docker inspect`, without running the
-    image. Nested manifest objects are flattened with dotted keys
-    (e.g. dev.nanvix.sdk.toolchain.llvm_commit); empty values are skipped so a
-    partially-resolved pin does not stamp blank labels.
-    """
+def flattened_manifest_labels(manifest: dict[str, Any]) -> dict[str, str]:
+    """Flatten a manifest into its exact ``dev.nanvix.sdk.*`` OCI label map."""
     def flatten(prefix: str, value: Any, out: dict[str, str]) -> None:
         if isinstance(value, dict):
             for key, sub in cast("dict[str, Any]", value).items():
@@ -304,8 +308,20 @@ def manifest_labels(manifest: dict[str, Any]) -> list[str]:
 
     labels: dict[str, str] = {}
     flatten("dev.nanvix.sdk", manifest, labels)
+    return labels
+
+
+def manifest_labels(manifest: dict[str, Any]) -> list[str]:
+    """Flatten the composed manifest into `--label dev.nanvix.sdk.*` build args.
+
+    Mirrors /opt/nanvix/nanvix-sdk.json onto OCI labels so consumers can resolve
+    provenance/compatibility with a plain `docker inspect`, without running the
+    image. Nested manifest objects are flattened with dotted keys
+    (e.g. dev.nanvix.sdk.toolchain.llvm_commit); empty values are skipped so a
+    partially-resolved pin does not stamp blank labels.
+    """
     args: list[str] = []
-    for key, value in labels.items():
+    for key, value in flattened_manifest_labels(manifest).items():
         args += ["--label", f"{key}={value}"]
     return args
 
@@ -595,40 +611,215 @@ def release_inputs_changed(since_ref: str) -> bool:
 # ===========================================================================
 
 def image_digest(ref: str, *, dry_run: bool) -> str:
-    """Return a pushed image's registry digest (`sha256:...`), or "" if unknown.
+    """Return a pushed image's registry digest (`sha256:...`), or fail closed.
 
     The digest only exists after a `docker push`, so this is a no-op under
-    --dry-run. Reads the first RepoDigests entry recorded locally by the push.
+    --dry-run. Requires exactly one RepoDigests entry for the pushed repository.
     """
     if dry_run:
         return ""
     out = subprocess.run(
-        ["docker", "inspect", "--format", "{{index .RepoDigests 0}}", ref],
-        capture_output=True, text=True,
-    )
-    if out.returncode != 0 or not out.stdout.strip():
-        warn(f"could not resolve registry digest for {ref}")
-        return ""
-    _, _, digest = out.stdout.strip().partition("@")
-    return digest
-
-
-def read_image_manifest(ref: str, *, dry_run: bool) -> dict[str, Any]:
-    """Read /opt/nanvix/nanvix-sdk.json out of a built image, or {} on failure."""
-    if dry_run:
-        return {}
-    out = subprocess.run(
-        ["docker", "run", "--rm", ref, "cat", "/opt/nanvix/nanvix-sdk.json"],
+        ["docker", "inspect", "--format", "{{json .RepoDigests}}", ref],
         capture_output=True, text=True,
     )
     if out.returncode != 0:
-        warn(f"could not read manifest from {ref}: {out.stderr.strip()}")
-        return {}
+        die(f"could not inspect pushed image {ref}: {out.stderr.strip()}")
     try:
-        return cast("dict[str, Any]", json.loads(out.stdout))
+        repo_digests = json.loads(out.stdout)
     except ValueError:
-        warn(f"{ref}: /opt/nanvix/nanvix-sdk.json is not valid JSON")
+        die(f"docker returned invalid RepoDigests metadata for {ref}")
+    image_name = ref.rsplit(":", 1)[0]
+    matches = [
+        item.partition("@")[2]
+        for item in repo_digests
+        if isinstance(item, str) and item.startswith(f"{image_name}@")
+    ]
+    if len(matches) != 1 or DIGEST_PATTERN.fullmatch(matches[0]) is None:
+        die(f"could not resolve one pushed sha256 digest for {ref}")
+    return matches[0]
+
+
+def read_image_manifest(ref: str, *, dry_run: bool) -> dict[str, Any]:
+    """Read /opt/nanvix/nanvix-sdk.json out of an image, failing closed."""
+    if dry_run:
         return {}
+    out = subprocess.run(
+        ["docker", "run", "--rm", "--entrypoint", "cat",
+         ref, "/opt/nanvix/nanvix-sdk.json"],
+        capture_output=True, text=True,
+    )
+    if out.returncode != 0:
+        die(f"could not read manifest from {ref}: {out.stderr.strip()}")
+    try:
+        manifest = json.loads(out.stdout)
+    except ValueError:
+        die(f"{ref}: /opt/nanvix/nanvix-sdk.json is not valid JSON")
+    if not isinstance(manifest, dict):
+        die(f"{ref}: /opt/nanvix/nanvix-sdk.json is not a JSON object")
+    return cast("dict[str, Any]", manifest)
+
+
+def immutable_image_ref(image_name: str, digest: str) -> str:
+    """Construct and validate an immutable provider image reference."""
+    if "@" in image_name or ":" in image_name.rsplit("/", 1)[-1]:
+        die(f"image name must not contain a tag or digest: {image_name!r}")
+    if DIGEST_PATTERN.fullmatch(digest) is None:
+        die(f"invalid image digest {digest!r}; expected sha256:<64 lowercase hex>")
+    return f"{image_name}@{digest}"
+
+
+def inspect_image_labels(ref: str) -> dict[str, str]:
+    """Read OCI labels from an already-pulled image reference."""
+    out = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{json .Config.Labels}}", ref],
+        capture_output=True, text=True,
+    )
+    if out.returncode != 0:
+        die(f"could not inspect OCI labels for {ref}: {out.stderr.strip()}")
+    try:
+        labels = json.loads(out.stdout)
+    except ValueError:
+        die(f"docker returned invalid OCI label metadata for {ref}")
+    if not isinstance(labels, dict) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in labels.items()):
+        die(f"{ref}: OCI labels are missing or malformed")
+    return cast("dict[str, str]", labels)
+
+
+def verify_image_metadata(ref: str, *, pull: bool = False) -> dict[str, Any]:
+    """Validate the embedded manifest and its exact flattened OCI-label mirror."""
+    if pull:
+        rc = run(["docker", "pull", ref], dry_run=False)
+        if rc != 0:
+            die(f"could not pull immutable image {ref}")
+    labels = inspect_image_labels(ref)
+    manifest = read_image_manifest(ref, dry_run=False)
+    validate_schema(manifest, load_schema("nanvix-sdk.schema.json"),
+                    f"{ref} embedded manifest")
+    expected = flattened_manifest_labels(manifest)
+    actual = {
+        key: value
+        for key, value in labels.items()
+        if key.startswith("dev.nanvix.sdk.")
+    }
+    if actual != expected:
+        missing = sorted(set(expected) - set(actual))
+        extra = sorted(set(actual) - set(expected))
+        changed = sorted(
+            key for key in set(actual) & set(expected)
+            if actual[key] != expected[key]
+        )
+        details = []
+        if missing:
+            details.append(f"missing labels: {', '.join(missing)}")
+        if extra:
+            details.append(f"unexpected labels: {', '.join(extra)}")
+        if changed:
+            details.append("mismatched labels: " + ", ".join(
+                f"{key}={actual[key]!r} (manifest {expected[key]!r})"
+                for key in changed
+            ))
+        die(f"{ref}: OCI labels do not exactly mirror the embedded manifest"
+            + (f": {'; '.join(details)}" if details else ""))
+    return manifest
+
+
+def build_release_contract(provider_id: str, image_name: str, digest: str,
+                           manifest: dict[str, Any]) -> dict[str, Any]:
+    """Build the public contract solely from verified immutable-image metadata."""
+    ref = immutable_image_ref(image_name, digest)
+    expected_name = image_ref(provider_id, "unused").rsplit(":", 1)[0]
+    if image_name != expected_name:
+        die(f"provider {provider_id!r} publishes {expected_name!r}, not {image_name!r}")
+
+    nanvix_tag = manifest.get("libc", {}).get("nanvix_tag")
+    nanvix_version = manifest.get("libc", {}).get("nanvix_version")
+    if not isinstance(nanvix_tag, str) or nanvix_version != nanvix_tag.removeprefix("v"):
+        die("embedded libc.nanvix_version is not derived from libc.nanvix_tag")
+
+    contract = {
+        "schema_version": 1,
+        "sdk_version": manifest.get("sdk_version"),
+        "provider_id": provider_id,
+        "provider": manifest.get("provider"),
+        "role": manifest.get("role"),
+        "image": {
+            "name": image_name,
+            "digest": digest,
+            "ref": ref,
+        },
+        "target": manifest.get("target"),
+        "toolchain": manifest.get("toolchain"),
+        "libc": manifest.get("libc"),
+        "compat": manifest.get("compat"),
+        "features": manifest.get("features"),
+    }
+    # A JSON round trip detaches nested structures from the parsed manifest.
+    contract = cast("dict[str, Any]", json.loads(json.dumps(contract)))
+    validate_schema(contract, load_schema("sdk-release.schema.json"),
+                    "SDK release contract")
+    if contract["image"]["ref"] != f"{contract['image']['name']}@{contract['image']['digest']}":
+        die("SDK release contract image.ref is not name@digest")
+    return contract
+
+
+def load_json_object(path: Path, desc: str) -> dict[str, Any]:
+    """Load a JSON object from disk with a closed failure mode."""
+    try:
+        value = json.loads(path.read_text())
+    except OSError as exc:
+        die(f"could not read {desc} {path}: {exc}")
+    except ValueError as exc:
+        die(f"{desc} {path} is not valid JSON: {exc}")
+    if not isinstance(value, dict):
+        die(f"{desc} {path} is not a JSON object")
+    return cast("dict[str, Any]", value)
+
+
+def deterministic_json(value: Any) -> str:
+    """Return the canonical, human-readable serialization used for releases."""
+    return json.dumps(value, indent=2, sort_keys=True, separators=(",", ": ")) + "\n"
+
+
+def atomic_write_json(path: Path, value: Any) -> bool:
+    """Atomically write deterministic JSON; return false when already identical."""
+    content = deterministic_json(value)
+    try:
+        if path.exists() and path.read_text() == content:
+            return False
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            with temporary.open("x") as output:
+                output.write(content)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, path)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+    except OSError as exc:
+        die(f"could not atomically write {path}: {exc}")
+    return True
+
+
+def dispatch_payload(contract: dict[str, Any], release_url: str) -> dict[str, Any]:
+    """Build a deterministic, downstream-idempotent repository_dispatch body."""
+    validate_schema(contract, load_schema("sdk-release.schema.json"),
+                    "SDK release contract")
+    if not re.fullmatch(r"https://github\.com/[^/]+/[^/]+/releases/tag/[^/]+", release_url):
+        die(f"invalid GitHub release URL {release_url!r}")
+    return {
+        "event_type": "nanvix-sdk-released",
+        "client_payload": {
+            "contract": contract,
+            "release_url": release_url,
+            "idempotency_key": (
+                f"{contract['sdk_version']}:{contract['image']['digest']}"
+            ),
+        },
+    }
 
 
 def _section_span(lines: list[str], section: str | None) -> tuple[int | None, int]:
@@ -801,30 +992,55 @@ def cmd_release(args: argparse.Namespace) -> None:
     info(f"releasing sdk_version={tag} to {REGISTRY}")
     cmd_build_image(args)
 
-    # The staged-sysroot digest is computed inside the build; record it back into
-    # the libc pin so subsequent builds of this pin are content-verifiable.
-    manifest = read_image_manifest(ref, dry_run=args.dry_run)
-    sysroot_sha256 = cast("str", manifest.get("libc", {}).get("sysroot_sha256", ""))
-    if sysroot_sha256 and sysroot_sha256 != libc.get("sysroot_sha256"):
-        if args.dry_run:
-            warn(f"DRY-RUN: would record sysroot_sha256 in {LIBC_LOCK.name}")
-        elif set_lock_value(LIBC_LOCK, "sysroot_sha256", sysroot_sha256):
-            info(f"recorded sysroot_sha256={sysroot_sha256[:19]}... in {LIBC_LOCK.name}")
+    if not args.dry_run:
+        # On the first release for a libc pin, the staged archive digest is only
+        # known after the image has fetched it. Record it and rebuild the cheap
+        # final metadata layers so the embedded manifest and OCI labels contain
+        # the same complete provenance before anything is pushed.
+        manifest = read_image_manifest(ref, dry_run=False)
+        sysroot_sha256 = cast("str", manifest.get("libc", {}).get("sysroot_sha256", ""))
+        if re.fullmatch(r"[0-9a-f]{64}", sysroot_sha256) is None:
+            die("built image is missing a valid libc.sysroot_sha256")
+        pinned_sysroot = cast("str", libc.get("sysroot_sha256", ""))
+        if pinned_sysroot and sysroot_sha256 != pinned_sysroot:
+            die("built sysroot digest does not match libc.lock: "
+                f"{sysroot_sha256} != {pinned_sysroot}")
+        if not pinned_sysroot:
+            if set_lock_value(LIBC_LOCK, "sysroot_sha256", sysroot_sha256):
+                info(f"recorded sysroot_sha256={sysroot_sha256[:19]}... in {LIBC_LOCK.name}")
+            cmd_build_image(args)
+            libc = load_toml(LIBC_LOCK)
+
+        manifest = verify_image_metadata(ref)
+        expected_manifest = compose_manifest(
+            load_toml(pdir / "provider.toml"), libc, tag, llvm_commit
+        )
+        if manifest != expected_manifest:
+            die("built image manifest does not match the pinned release inputs")
 
     provider_digest = umbrella_digest = ""
     if args.push:
-        run(["docker", "push", ref], dry_run=args.dry_run)
+        if run(["docker", "push", ref], dry_run=args.dry_run) != 0:
+            die(f"failed to push {ref}")
         provider_digest = image_digest(ref, dry_run=args.dry_run)
         # Publish the umbrella alias pointing at this provider image so ports
         # can pull ghcr.io/nanvix/nanvix-sdk:<tag> by its public coordinate.
         alias = umbrella_ref(tag)
-        run(["docker", "tag", ref, alias], dry_run=args.dry_run)
-        run(["docker", "push", alias], dry_run=args.dry_run)
+        if run(["docker", "tag", ref, alias], dry_run=args.dry_run) != 0:
+            die(f"failed to tag {alias}")
+        if run(["docker", "push", alias], dry_run=args.dry_run) != 0:
+            die(f"failed to push {alias}")
         umbrella_digest = image_digest(alias, dry_run=args.dry_run)
 
     # Pin the resolved sdk_version + tags/digests back into the release contract.
     update_umbrella_manifest(args.provider, tag, provider_digest, umbrella_digest,
                              dry_run=args.dry_run)
+    emit_github_output(
+        image_name=ref.rsplit(":", 1)[0],
+        image_digest=provider_digest,
+        image_ref=(f"{ref.rsplit(':', 1)[0]}@{provider_digest}"
+                   if provider_digest else ""),
+    )
 
 
 def cmd_plan_release(args: argparse.Namespace) -> None:
@@ -878,6 +1094,50 @@ def cmd_show(args: argparse.Namespace) -> None:
     print(json.dumps(manifest, indent=2))
 
 
+def cmd_generate_contract(args: argparse.Namespace) -> None:
+    """Generate sdk-release.json from a pushed image's immutable digest."""
+    if args.dry_run:
+        die("generate-contract cannot run dry: immutable image metadata is required")
+    ref = immutable_image_ref(args.image_name, args.digest)
+    manifest = verify_image_metadata(ref, pull=True)
+    contract = build_release_contract(
+        args.provider, args.image_name, args.digest, manifest
+    )
+    changed = atomic_write_json(args.output, contract)
+    info(f"{'wrote' if changed else 'verified unchanged'} {args.output}")
+    emit_github_output(
+        contract=str(args.output),
+        sdk_version=cast("str", contract["sdk_version"]),
+        image_ref=cast("str", contract["image"]["ref"]),
+    )
+
+
+def cmd_verify_contract(args: argparse.Namespace) -> None:
+    """Re-derive and compare every field of an existing release contract."""
+    if args.dry_run:
+        die("verify-contract cannot run dry: immutable image metadata is required")
+    contract = load_json_object(args.contract, "SDK release contract")
+    validate_schema(contract, load_schema("sdk-release.schema.json"),
+                    "SDK release contract")
+    image = cast("dict[str, str]", contract["image"])
+    ref = immutable_image_ref(image["name"], image["digest"])
+    if image["ref"] != ref:
+        die(f"{args.contract}: image.ref is not the immutable name@digest")
+    manifest = verify_image_metadata(ref, pull=True)
+    expected = build_release_contract(
+        cast("str", contract["provider_id"]), image["name"], image["digest"], manifest
+    )
+    if contract != expected:
+        die(f"{args.contract}: contract does not exactly match immutable image metadata")
+    info(f"verified {args.contract} against {ref}")
+
+
+def cmd_dispatch_payload(args: argparse.Namespace) -> None:
+    """Print the repository_dispatch request body without publishing it."""
+    contract = load_json_object(args.contract, "SDK release contract")
+    print(deterministic_json(dispatch_payload(contract, args.release_url)), end="")
+
+
 def cmd_update(args: argparse.Namespace) -> None:
     """Bump the pinned toolchain inputs, keeping the two SDK halves coupled.
 
@@ -915,12 +1175,14 @@ def cmd_update(args: argparse.Namespace) -> None:
             die(f"nanvix/nanvix: release tag {tag!r} declared by "
                 f"{target.repo}@{target.branch} does not resolve to a commit")
         info(f"libc: {libc.get('nanvix_tag', '(unset)')} -> {tag} ({commit[:12]})")
-        updated.extend(("nanvix_tag", "nanvix_commit"))
+        updated.extend(("nanvix_tag", "nanvix_commit", "sysroot_sha256"))
         if args.dry_run:
-            warn(f"DRY-RUN: would rewrite nanvix_tag/nanvix_commit in {LIBC_LOCK.name}")
+            warn("DRY-RUN: would rewrite nanvix_tag/nanvix_commit and clear "
+                 f"sysroot_sha256 in {LIBC_LOCK.name}")
         else:
             set_lock_value(LIBC_LOCK, "nanvix_tag", tag)
             set_lock_value(LIBC_LOCK, "nanvix_commit", commit)
+            set_lock_value(LIBC_LOCK, "sysroot_sha256", "")
     else:
         info(f"libc: already up to date ({tag})")
 
@@ -988,6 +1250,36 @@ def main() -> None:
 
     p_show = sub.add_parser("show", parents=[common], help="Print the artifact manifest")
     p_show.set_defaults(func=cmd_show)
+
+    p_contract = sub.add_parser(
+        "generate-contract", parents=[common],
+        help="Generate sdk-release.json from a pushed immutable image",
+    )
+    p_contract.add_argument("--digest", required=True,
+                            help="Pushed provider digest (sha256:<64 lowercase hex>).")
+    p_contract.add_argument(
+        "--image-name", default=f"{REGISTRY}/nanvix-sdk-c-clang",
+        help="Provider repository without a tag or digest.",
+    )
+    p_contract.add_argument("--output", type=Path, default=DEFAULT_CONTRACT,
+                            help="Contract output path (default: sdk-release.json).")
+    p_contract.set_defaults(func=cmd_generate_contract)
+
+    p_verify_contract = sub.add_parser(
+        "verify-contract", parents=[common],
+        help="Verify an existing contract against its immutable image",
+    )
+    p_verify_contract.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT,
+                                   help="Contract to verify (default: sdk-release.json).")
+    p_verify_contract.set_defaults(func=cmd_verify_contract)
+
+    p_payload = sub.add_parser(
+        "dispatch-payload",
+        help="Print a deterministic nanvix-sdk-released dispatch request body",
+    )
+    p_payload.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
+    p_payload.add_argument("--release-url", required=True)
+    p_payload.set_defaults(func=cmd_dispatch_payload)
 
     p_update = sub.add_parser("update", parents=[common],
                               help="Bump pinned inputs to latest upstream versions")

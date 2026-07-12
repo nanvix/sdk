@@ -32,7 +32,7 @@ release_pattern = "nanvix-x86-microvm-standalone-release-*.tar.bz2"
 # SHA-256 of the staged sysroot tarball, for reproducible/verifiable builds.
 # Recorded by `z.py release` from the built image's manifest; blank until the
 # first image of this pin is cut, then committed as part of the release review.
-sysroot_sha256 = ""
+sysroot_sha256 = "2bebdcf3679936de83f125821ddc033aef5727532fc2d2e2c720023cb5836788"
 
 # ---------------------------------------------------------------------------
 # ABI / compatibility keys.

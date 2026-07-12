@@ -6,8 +6,14 @@ tooling to install on the host.
 
 ## 1. Pull
 
+Discover completed releases from the tag's GitHub Release and download its
+`sdk-release.json` asset. Do not poll Git tags as a readiness signal: the tag is
+created before image publication. Pin `image.ref` from the contract so both the
+pull and every run use the verified immutable digest. The full contract is
+documented in [`release-contract.md`](release-contract.md).
+
 ```bash
-docker pull ghcr.io/nanvix/nanvix-sdk-c-clang:<version>
+docker pull ghcr.io/nanvix/nanvix-sdk-c-clang@sha256:<digest>
 ```
 
 The tag is the SDK version, formatted `v<nanvix>-sdk.<N>` (e.g.
@@ -52,8 +58,8 @@ RUN make
 
 ## 3. Inspect
 
-The provenance + compatibility manifest is baked into the image and mirrored as
-`dev.nanvix.sdk.*` OCI labels:
+The provenance + compatibility manifest is baked into the image and mirrored
+exactly as `dev.nanvix.sdk.*` OCI labels:
 
 ```bash
 docker run --rm "$IMG" cat /opt/nanvix/nanvix-sdk.json
@@ -76,7 +82,8 @@ only records the coordinate that matches your image.
 
 Run the **exact** release your image was built against, so your binary's
 syscall/libc ABI matches the kernel. That coordinate is in the image manifest —
-`libc.nanvix_tag` (release) and `libc.nanvix_commit` (exact commit):
+`libc.nanvix_tag` (release), `libc.nanvix_version` (tag without `v`), and
+`libc.nanvix_commit` (exact commit):
 
 ```bash
 IMG=ghcr.io/nanvix/nanvix-sdk-c-clang:<version>

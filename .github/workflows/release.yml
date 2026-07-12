@@ -29,7 +29,7 @@ concurrency:
 #==================================================================================================
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 #==================================================================================================
@@ -73,6 +73,7 @@ jobs:
       # plus the umbrella ghcr.io/nanvix/nanvix-sdk:<version> alias, each
       # carrying the nanvix-sdk.json manifest + OCI labels.
       - name: Build and push c-clang SDK image
+        id: build
         run: |
           VERSION="${GITHUB_REF_NAME}"
           ./z.py release --no-dry-run --version "${VERSION}" \
@@ -81,5 +82,65 @@ jobs:
 
       - name: Verify pushed image
         run: |
-          ./z.py verify --no-dry-run --version "${GITHUB_REF_NAME}" \
-            --provider c-clang
+          ./z.py verify --no-dry-run --provider c-clang \
+            --image "${{ steps.build.outputs.image_ref }}"
+
+      # The public contract is derived only after the pushed image passes its
+      # non-root canaries. Its helper pulls, inspects, and runs name@digest,
+      # then requires every embedded manifest field to match its OCI label.
+      - name: Generate release contract
+        run: |
+          ./z.py generate-contract --no-dry-run --provider c-clang \
+            --image-name "${{ steps.build.outputs.image_name }}" \
+            --digest "${{ steps.build.outputs.image_digest }}" \
+            --output sdk-release.json
+
+      - name: Verify release contract
+        run: |
+          ./z.py verify-contract --no-dry-run \
+            --contract sdk-release.json
+
+      # A rerun edits the release for this existing tag and replaces the asset,
+      # rather than creating duplicate release state.
+      - name: Create or refresh GitHub Release
+        id: github-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE="Nanvix SDK ${GITHUB_REF_NAME}"
+          NOTES="Verified Nanvix SDK release. The attached sdk-release.json is the authoritative immutable contract."
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" \
+              --title "${TITLE}" --notes "${NOTES}"
+          else
+            gh release create "${GITHUB_REF_NAME}" --verify-tag \
+              --draft --title "${TITLE}" --notes "${NOTES}"
+          fi
+          gh release upload "${GITHUB_REF_NAME}" sdk-release.json --clobber
+          gh release edit "${GITHUB_REF_NAME}" --draft=false
+          RELEASE_URL="$(gh release view "${GITHUB_REF_NAME}" --json url --jq .url)"
+          echo "release_url=${RELEASE_URL}" >> "${GITHUB_OUTPUT}"
+
+      - name: Detect optional dispatch token
+        id: dispatch-token
+        env:
+          DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+        run: |
+          if [ -n "${DISPATCH_TOKEN}" ]; then
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      # repository_dispatch is optional. The stable digest-based idempotency key
+      # lets nanvix/workflows safely collapse deliveries from workflow reruns.
+      - name: Dispatch verified SDK release
+        if: steps.dispatch-token.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          RELEASE_URL: ${{ steps.github-release.outputs.release_url }}
+        run: |
+          set -o pipefail
+          ./z.py dispatch-payload --contract sdk-release.json \
+            --release-url "${RELEASE_URL}" \
+            | gh api --method POST repos/nanvix/workflows/dispatches --input -
