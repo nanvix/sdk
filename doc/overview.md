@@ -60,4 +60,5 @@ and the static archives from one place:
 ```
 
 See [`consuming.md`](consuming.md) to use it, [`versioning.md`](versioning.md)
-for how versions are cut, and the `adding-a-*.md` guides to extend it.
+for how versions are cut, [`release-contract.md`](release-contract.md) for the
+post-verification downstream signal, and the `adding-a-*.md` guides to extend it.

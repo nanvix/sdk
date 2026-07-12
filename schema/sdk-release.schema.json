@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/nanvix/sdk/dev/schema/sdk-release.schema.json",
+  "title": "Verified Nanvix SDK release contract",
+  "description": "Authoritative post-verification contract generated from an immutable pushed c-clang image.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "sdk_version",
+    "provider_id",
+    "provider",
+    "role",
+    "image",
+    "target",
+    "toolchain",
+    "libc",
+    "compat",
+    "features"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "sdk_version": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+-sdk\\.[0-9]+$"
+    },
+    "provider_id": {
+      "type": "string",
+      "const": "c-clang"
+    },
+    "provider": {
+      "type": "string",
+      "const": "clang"
+    },
+    "role": {
+      "type": "string",
+      "const": "c"
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "digest", "ref"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "const": "ghcr.io/nanvix/nanvix-sdk-c-clang"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "ref": {
+          "type": "string",
+          "pattern": "^ghcr\\.io/nanvix/nanvix-sdk-c-clang@sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["triple", "alias"],
+      "properties": {
+        "triple": {
+          "type": "string",
+          "const": "i686-unknown-nanvix"
+        },
+        "alias": {
+          "type": "string",
+          "const": "i686-nanvix"
+        }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["llvm_version", "llvm_commit", "port_branch"],
+      "properties": {
+        "llvm_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "llvm_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "port_branch": {
+          "type": "string",
+          "pattern": "^nanvix/v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        }
+      }
+    },
+    "libc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nanvix_tag",
+        "nanvix_version",
+        "nanvix_commit",
+        "sysroot_sha256"
+      ],
+      "properties": {
+        "nanvix_tag": {
+          "type": "string",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "nanvix_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "nanvix_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "sysroot_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "compat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["c_abi", "cxx_abi", "abi", "min_nanvix_os"],
+      "properties": {
+        "c_abi": {
+          "type": "string",
+          "pattern": "^i686-nanvix-sysv-[0-9]+$"
+        },
+        "cxx_abi": {
+          "type": "string",
+          "const": "libc++"
+        },
+        "abi": {
+          "type": "string",
+          "const": "static-elf"
+        },
+        "min_nanvix_os": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        }
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "localization",
+        "filesystem",
+        "wide_chars",
+        "compiler_rt",
+        "dynamic_loader"
+      ],
+      "properties": {
+        "localization": {
+          "type": "boolean"
+        },
+        "filesystem": {
+          "type": "boolean"
+        },
+        "wide_chars": {
+          "type": "boolean"
+        },
+        "compiler_rt": {
+          "type": "string",
+          "enum": ["builtins-only", "full"]
+        },
+        "dynamic_loader": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

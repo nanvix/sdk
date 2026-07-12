@@ -40,6 +40,11 @@ pinning the concrete image tags/digests of every enabled provider and layer
 under one `sdk_version`. The umbrella tag `ghcr.io/nanvix/nanvix-sdk:<version>`
 aliases that set.
 
+The repository tag is cut before the image build starts. Publication is complete
+only when that tag has a GitHub Release with a verified `sdk-release.json`
+asset. See [`release-contract.md`](release-contract.md) for the immutable
+downstream contract and optional dispatch signal.
+
 ## Feature gates
 
 `features{}` in the manifest records machine-readable capability gates

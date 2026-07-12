@@ -176,14 +176,14 @@ FROM ubuntu:24.04
 
 ARG INSTALL_LOCATION
 
-# Port build dependencies (kept in sync with the current toolchain-clang image):
-# make/autotools/perl/python and ld.lld's runtime dep on libxml2.
+# Port build dependencies. Keep the common host compiler/development tools
+# explicit: downstream ports commonly use them for build-time generators.
 RUN set -eux; \
     export DEBIAN_FRONTEND=noninteractive; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        make binutils libxml2 pkg-config \
-        m4 autoconf automake libtool patch \
+        gcc libc6-dev make binutils libxml2 libltdl-dev pkg-config \
+        m4 autoconf automake libtool patch texinfo cmake \
         bzip2 xz-utils gzip python3 perl file \
         ca-certificates gawk sed diffutils findutils; \
     rm -rf /var/lib/apt/lists/*
