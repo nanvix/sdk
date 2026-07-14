@@ -21,10 +21,10 @@ schema_version = 1
 # Nanvix libc release pin.
 # ---------------------------------------------------------------------------
 # Release tag consumed as Z_NANVIX_RELEASE_TAG by llvm/z (stage 1).
-nanvix_tag = "v0.20.0"
+nanvix_tag = "v0.20.2"
 
 # Exact commit the tag resolves to.
-nanvix_commit = "edda6ab30be8c804a9a2baeaca0195945c3e3bc1"
+nanvix_commit = "e41cef2fb035b2742d2c97bb6350b452ccb024a2"
 
 # Asset name glob inside the release (matches llvm/z NANVIX_RELEASE_PATTERN).
 release_pattern = "nanvix-x86-microvm-standalone-release-*.tar.bz2"
@@ -32,7 +32,7 @@ release_pattern = "nanvix-x86-microvm-standalone-release-*.tar.bz2"
 # SHA-256 of the staged sysroot tarball, for reproducible/verifiable builds.
 # Recorded by `z.py release` from the built image's manifest; blank until the
 # first image of this pin is cut, then committed as part of the release review.
-sysroot_sha256 = "2bebdcf3679936de83f125821ddc033aef5727532fc2d2e2c720023cb5836788"
+sysroot_sha256 = ""
 
 # ---------------------------------------------------------------------------
 # ABI / compatibility keys.
