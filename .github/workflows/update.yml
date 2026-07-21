@@ -8,10 +8,10 @@ name: Update Pipeline
 #==================================================================================================
 
 on:
-  # Nightly check for newer pinned inputs (08:00 UTC == 00:00 PST), matching the
-  # llvm fork's nanvix-update schedule.
+  # Nightly check six hours after the llvm fork's 08:00 UTC nanvix-update
+  # schedule, leaving time for its update PR, CI, and merge to complete first.
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '0 14 * * *'
   workflow_dispatch:
 
 # Serialize update runs so concurrent bumps do not race on the PR branch.
