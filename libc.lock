@@ -21,10 +21,10 @@ schema_version = 1
 # Nanvix libc release pin.
 # ---------------------------------------------------------------------------
 # Release tag consumed as Z_NANVIX_RELEASE_TAG by llvm/z (stage 1).
-nanvix_tag = "v0.23.11"
+nanvix_tag = "v0.23.14"
 
 # Exact commit the tag resolves to.
-nanvix_commit = "26e7f00cb1d320424225711486fe98d82719477f"
+nanvix_commit = "1dc3b545899cd6214911da851be1857e2f930b76"
 
 # Asset name glob inside the release (matches llvm/z NANVIX_RELEASE_PATTERN).
 release_pattern = "nanvix-x86-microvm-standalone-release-*.tar.bz2"
